@@ -16,9 +16,7 @@ class Appointment(models.Model):
     rut = models.CharField(max_length=12)
     phone = models.CharField(max_length=20)
     service_type = models.CharField(
-        max_length=30,
-        choices=ServiceType.choices,
-        default=ServiceType.GENERAL,
+        max_length=150,
     )
     appointment_date = models.DateField()
     appointment_time = models.TimeField()
