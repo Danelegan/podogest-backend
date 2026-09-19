@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-!cikq_%3qhd4xsl0iy@e5njcxt4^=izs+-3x40v1#@5w!3dvw*
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'podogest-frontend.vercel.app']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'podogest-frontend.vercel.app', '.onrender.com']
 
 
 # Application definition
