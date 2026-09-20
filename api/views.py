@@ -42,6 +42,8 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         headers = {
             'Authorization': f'Bearer {os.environ.get("RESEND_API_KEY", "")}',
             'Content-Type': 'application/json',
+            # Cloudflare (delante de Resend) bloquea el User-Agent por defecto de urllib (error 1010).
+            'User-Agent': 'podogest-backend/1.0',
         }
 
         # Si el correo falla la cita igual queda guardada; solo se registra el error.
