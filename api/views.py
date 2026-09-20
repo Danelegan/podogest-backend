@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import urllib.error
 import urllib.request
 from html import escape
 
@@ -53,5 +54,12 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             )
             with urllib.request.urlopen(req, timeout=10) as response:
                 logger.info('Resend: %s', response.read())
+        except urllib.error.HTTPError as e:
+            # Resend explica en el cuerpo de la respuesta por qué rechazó la petición.
+            logger.error(
+                'Resend rechazó el correo (HTTP %s): %s',
+                e.code,
+                e.read().decode('utf-8', errors='replace'),
+            )
         except Exception:
             logger.exception('Error al enviar el correo con Resend')
