@@ -27,7 +27,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         # En la capa gratuita de Resend, 'from' debe ser onboarding@resend.dev
         # y 'to' solo puede ser el correo con el que te registraste en Resend.
         payload = {
-            'from': 'PodoGest <onboarding@resend.dev>',
+            'from': '<onboarding@resend.dev>',
             'to': [appointment.email],
             'subject': f'Confirmación de cita PodoGest - {appointment.appointment_date:%d-%m-%Y}',
             'html': (
