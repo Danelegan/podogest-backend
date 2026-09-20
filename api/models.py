@@ -15,6 +15,7 @@ class Appointment(models.Model):
     patient_name = models.CharField(max_length=150)
     rut = models.CharField(max_length=12)
     phone = models.CharField(max_length=20)
+    email = models.EmailField(blank=True)
     service_type = models.CharField(
         max_length=150,
     )
