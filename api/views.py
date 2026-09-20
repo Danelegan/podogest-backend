@@ -1,13 +1,17 @@
+import json
 import logging
+import os
+import urllib.request
+from html import escape
 
-from django.conf import settings
-from django.core.mail import send_mail
 from rest_framework import viewsets
 
 from .models import Appointment
 from .serializers import AppointmentSerializer
 
 logger = logging.getLogger(__name__)
+
+RESEND_URL = 'https://api.resend.com/emails'
 
 
 class AppointmentViewSet(viewsets.ModelViewSet):
@@ -20,23 +24,34 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             self._send_confirmation(appointment)
 
     def _send_confirmation(self, appointment):
-        subject = f'Confirmación de cita PodoGest - {appointment.appointment_date:%d-%m-%Y}'
-        message = (
-            f'Hola {appointment.patient_name},\n\n'
-            'Tu cita ha sido agendada con éxito.\n\n'
-            'Detalles de la reserva:\n'
-            f'Fecha: {appointment.appointment_date:%d-%m-%Y}\n'
-            f'Hora: {appointment.appointment_time:%H:%M}\n\n'
-            'Te esperamos en la clínica. ¡Saludos!'
-        )
+        # En la capa gratuita de Resend, 'from' debe ser onboarding@resend.dev
+        # y 'to' solo puede ser el correo con el que te registraste en Resend.
+        payload = {
+            'from': 'PodoGest <onboarding@resend.dev>',
+            'to': [appointment.email],
+            'subject': f'Confirmación de cita PodoGest - {appointment.appointment_date:%d-%m-%Y}',
+            'html': (
+                f'<h3>Hola {escape(appointment.patient_name)},</h3>'
+                '<p>Tu cita ha sido agendada con éxito.</p>'
+                f'<p><strong>Fecha:</strong> {appointment.appointment_date:%d-%m-%Y}<br>'
+                f'<strong>Hora:</strong> {appointment.appointment_time:%H:%M}</p>'
+                '<p>Te esperamos en la clínica. ¡Saludos!</p>'
+            ),
+        }
+        headers = {
+            'Authorization': f'Bearer {os.environ.get("RESEND_API_KEY", "")}',
+            'Content-Type': 'application/json',
+        }
+
         # Si el correo falla la cita igual queda guardada; solo se registra el error.
         try:
-            send_mail(
-                subject=subject,
-                message=message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[appointment.email],
-                fail_silently=False,
+            req = urllib.request.Request(
+                RESEND_URL,
+                data=json.dumps(payload).encode('utf-8'),
+                headers=headers,
+                method='POST',
             )
-        except Exception as e:
-            print(f"Error al enviar el correo: {e}")
+            with urllib.request.urlopen(req, timeout=10) as response:
+                logger.info('Resend: %s', response.read())
+        except Exception:
+            logger.exception('Error al enviar el correo con Resend')
