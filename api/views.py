@@ -6,7 +6,9 @@ import urllib.request
 from html import escape
 
 from rest_framework import viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
 
 from .models import Appointment
 from .serializers import AppointmentSerializer
@@ -21,10 +23,16 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     serializer_class = AppointmentSerializer
 
     def get_permissions(self):
-        # Cualquiera puede agendar (POST); ver, editar y borrar exige autenticación.
-        if self.action == 'create':
+        # Agendar y consultar horarios ocupados es público; el resto exige autenticación.
+        if self.action in ['create', 'horarios_ocupados']:
             return [AllowAny()]
         return [IsAuthenticated()]
+
+    @action(detail=False, methods=['get'], url_path='horarios-ocupados')
+    def horarios_ocupados(self, request):
+        # Solo fecha y hora, sin datos personales, para bloquearlas en el calendario.
+        citas = self.get_queryset().values('appointment_date', 'appointment_time')
+        return Response(list(citas))
 
     def perform_create(self, serializer):
         appointment = serializer.save()
