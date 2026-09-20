@@ -38,5 +38,5 @@ class AppointmentViewSet(viewsets.ModelViewSet):
                 recipient_list=[appointment.email],
                 fail_silently=False,
             )
-        except Exception:
-            logger.exception('Error al enviar el correo de confirmación')
+        except Exception as e:
+            print(f"Error al enviar el correo: {e}")
