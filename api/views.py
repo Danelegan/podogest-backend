@@ -6,6 +6,7 @@ import urllib.request
 from html import escape
 
 from rest_framework import viewsets
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from .models import Appointment
 from .serializers import AppointmentSerializer
@@ -18,6 +19,12 @@ RESEND_URL = 'https://api.resend.com/emails'
 class AppointmentViewSet(viewsets.ModelViewSet):
     queryset = Appointment.objects.all()
     serializer_class = AppointmentSerializer
+
+    def get_permissions(self):
+        # Cualquiera puede agendar (POST); ver, editar y borrar exige autenticación.
+        if self.action == 'create':
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     def perform_create(self, serializer):
         appointment = serializer.save()
