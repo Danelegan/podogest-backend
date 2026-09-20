@@ -10,8 +10,8 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Appointment
-from .serializers import AppointmentSerializer
+from .models import Appointment, ClinicalRecord
+from .serializers import AppointmentSerializer, ClinicalRecordSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -80,3 +80,19 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             )
         except Exception:
             logger.exception('Error al enviar el correo con Resend')
+
+
+class ClinicalRecordViewSet(viewsets.ModelViewSet):
+    """Fichas podológicas: solo accesibles con JWT (uso exclusivo de la podóloga)."""
+
+    queryset = ClinicalRecord.objects.select_related('appointment')
+    serializer_class = ClinicalRecordSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        # Permite buscar la ficha de una cita: /api/clinical-records/?appointment=<id>
+        appointment_id = self.request.query_params.get('appointment')
+        if appointment_id:
+            queryset = queryset.filter(appointment_id=appointment_id)
+        return queryset

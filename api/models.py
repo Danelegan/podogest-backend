@@ -35,3 +35,26 @@ class Appointment(models.Model):
 
     def __str__(self):
         return f'{self.patient_name} - {self.appointment_date} {self.appointment_time:%H:%M}'
+
+
+class ClinicalRecord(models.Model):
+    """Ficha podológica: evaluación clínica asociada a una cita."""
+
+    appointment = models.OneToOneField(
+        Appointment,
+        on_delete=models.CASCADE,
+        related_name='clinical_record',
+    )
+    antecedentes_medicos = models.TextField(blank=True, null=True)
+    sintomas = models.TextField(blank=True, null=True)
+    diagnostico = models.TextField(blank=True, null=True)
+    tratamiento_realizado = models.TextField(blank=True, null=True)
+    observaciones = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Ficha de {self.appointment.patient_name} ({self.appointment.appointment_date})'
