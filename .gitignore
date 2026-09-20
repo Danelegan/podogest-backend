@@ -11,3 +11,6 @@ __pycache__/
 
 # Variables de entorno
 .env
+
+# Archivos de sistema de Windows
+desktop.ini
