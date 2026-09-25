@@ -12,6 +12,7 @@ from rest_framework.response import Response
 
 from .models import Appointment, ClinicalRecord
 from .serializers import AppointmentSerializer, ClinicalRecordSerializer
+from .throttles import ReservaBurstThrottle, ReservaSustainedThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,13 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'horarios_ocupados']:
             return [AllowAny()]
         return [IsAuthenticated()]
+
+    def get_throttles(self):
+        # Crear reservas es público: se añade un límite estricto contra spam/DoS
+        # además del límite anónimo general. Los usuarios con JWT no se ven afectados.
+        if self.action == 'create':
+            return [*super().get_throttles(), ReservaBurstThrottle(), ReservaSustainedThrottle()]
+        return super().get_throttles()
 
     @action(detail=False, methods=['get'], url_path='horarios-ocupados')
     def horarios_ocupados(self, request):

@@ -14,19 +14,28 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Carga las variables del archivo .env en desarrollo local. En Render no existe
+# .env y las variables vienen del panel (las ya definidas no se sobrescriben).
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-!cikq_%3qhd4xsl0iy@e5njcxt4^=izs+-3x40v1#@5w!3dvw*'
-
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Por defecto False: solo se activa con DEBUG=True en el .env local.
+DEBUG = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 'yes')
+
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    raise ImproperlyConfigured('Falta la variable de entorno SECRET_KEY.')
 
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'podogest-frontend.vercel.app', '.onrender.com']
 
@@ -49,12 +58,10 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.security.SecurityMiddleware',
-    # Debe ir lo más arriba posible, antes de CommonMiddleware,
-    # para poder añadir las cabeceras CORS a las respuestas.
+    # Debe ir lo más arriba posible, antes de WhiteNoise y CommonMiddleware,
+    # para poder añadir las cabeceras CORS a todas las respuestas.
     'corsheaders.middleware.CorsMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -86,16 +93,25 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
+# Usa DATABASE_URL (PostgreSQL en Render); sin ella, SQLite local.
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default=f'sqlite:///{BASE_DIR / "db.sqlite3"}',
+        conn_max_age=600,
+    )
 }
 
-database_url = os.environ.get("DATABASE_URL")
-if database_url:
-    DATABASES['default'] = dj_database_url.config(default=database_url, conn_max_age=600)
+
+# Cache
+# Guardada en la base de datos para que los contadores de rate limiting se
+# compartan entre todos los workers de Gunicorn. La tabla se crea con:
+#   python manage.py createcachetable
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'podogest_cache',
+    }
+}
 
 
 # Password validation
@@ -137,10 +153,21 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 
 # CORS
-# Orígenes del frontend autorizados a llamar a esta API.
+# Solo los orígenes listados pueden llamar a esta API desde el navegador.
+CORS_ALLOW_ALL_ORIGINS = False
+
 CORS_ALLOWED_ORIGINS = [
-    'http://localhost:5173',              # Vite (desarrollo local)
-    'https://podogest-frontend.vercel.app',     
+    'http://localhost:5173',  # Vite (desarrollo local)
+    'http://127.0.0.1:5173',
+]
+
+# URLs del frontend en producción, separadas por comas. Ej. en Render:
+#   FRONTEND_URLS=https://podogest-frontend.vercel.app
+# Deben incluir el esquema (https://) y no terminar en '/'.
+CORS_ALLOWED_ORIGINS += [
+    url.strip().rstrip('/')
+    for url in os.environ.get('FRONTEND_URLS', 'https://podogest-frontend.vercel.app').split(',')
+    if url.strip()
 ]
 
 
@@ -165,4 +192,19 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
+    # Rate limiting: límite general para cualquier petición anónima
+    # (incluye /api/token/, lo que frena ataques de fuerza bruta al login).
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/hour',
+        # Límites estrictos solo para crear reservas (ver api/throttles.py).
+        'reservas_burst': '5/min',
+        'reservas_sustained': '20/hour',
+    },
+    # Número de proxies delante de Django: 1 por defecto (Render). Ajustable con
+    # la variable NUM_PROXIES. Sin esto, DRF confía en X-Forwarded-For completo
+    # y un atacante podría falsearlo para saltarse el límite.
+    'NUM_PROXIES': int(os.environ.get('NUM_PROXIES', '1')),
 }
