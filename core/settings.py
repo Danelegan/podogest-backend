@@ -37,7 +37,7 @@ SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
     raise ImproperlyConfigured('Falta la variable de entorno SECRET_KEY.')
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'podogest-frontend.vercel.app', '.onrender.com']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'podogest-frontend.vercel.app', '.onrender.com', 'www.pasossaludables.cl' ]
 
 
 # Application definition
@@ -178,7 +178,7 @@ CORS_ALLOWED_ORIGINS = [
 # Deben incluir el esquema (https://) y no terminar en '/'.
 CORS_ALLOWED_ORIGINS += [
     url.strip().rstrip('/')
-    for url in os.environ.get('FRONTEND_URLS', 'https://podogest-frontend.vercel.app').split(',')
+    for url in os.environ.get('FRONTEND_URLS', 'https://podogest-frontend.vercel.app,https://pasossaludables.cl,https://www.pasossaludables.cl').split(',')
     if url.strip()
 ]
 
