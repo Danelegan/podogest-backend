@@ -149,7 +149,19 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+# Carpeta donde `collectstatic` reúne los archivos que WhiteNoise sirve en producción.
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# STATICFILES_STORAGE ya no existe desde Django 5.1: se configura con STORAGES.
+# WhiteNoise comprime los archivos y les añade un hash para cachearlos sin riesgo.
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 
 # CORS
