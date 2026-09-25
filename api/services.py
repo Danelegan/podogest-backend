@@ -6,9 +6,10 @@ import resend
 
 logger = logging.getLogger(__name__)
 
-# Mientras el dominio propio se verifica en Resend se usa su remitente de pruebas.
-# En ese modo 'to' solo puede ser el correo con el que te registraste en Resend.
-FROM_EMAIL = 'PodoGest <onboarding@resend.dev>'
+# El remitente debe pertenecer a un dominio verificado en Resend (pasossaludables.cl).
+FROM_EMAIL = 'PasosSaludables <citas@pasossaludables.cl>'
+# Si el paciente responde el correo, la respuesta llega a este buzón.
+REPLY_TO = 'arokelina@gmail.com'
 
 
 def send_appointment_confirmation(appointment):
@@ -27,7 +28,8 @@ def send_appointment_confirmation(appointment):
     params: resend.Emails.SendParams = {
         'from': FROM_EMAIL,
         'to': [appointment.email],
-        'subject': f'Confirmación de cita PodoGest - {fecha}',
+        'reply_to': REPLY_TO,
+        'subject': f'Confirmación de cita PasosSaludables - {fecha}',
         'html': (
             f'<h3>Hola {escape(appointment.patient_name)},</h3>'
             '<p>Tu cita ha sido agendada con éxito.</p>'
