@@ -1,9 +1,16 @@
-from datetime import date, time
+from datetime import date, time, timedelta
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APIClient
+
+from api.services import make_appointment_token
 
 
 def reserva(hour):
@@ -61,3 +68,85 @@ class CorsTests(TestCase):
     def test_origen_no_permitido(self):
         response = self.preflight('https://sitio-malicioso.com')
         self.assertNotIn('Access-Control-Allow-Origin', response.headers)
+
+
+@override_settings(CRON_SECRET='secreto-de-prueba')
+class RecordatorioTests(TestCase):
+    def crear_cita(self, en_horas, **extra):
+        from api.models import Appointment
+        inicio = timezone.localtime(
+            timezone.now() + timedelta(hours=en_horas),
+            ZoneInfo(settings.CLINIC_TIME_ZONE),
+        )
+        datos = {
+            'patient_name': 'Paciente Prueba',
+            'rut': '11111111-1',
+            'phone': '+56911111111',
+            'email': 'paciente@example.com',
+            'service_type': 'general',
+            'appointment_date': inicio.date(),
+            'appointment_time': inicio.time().replace(second=0, microsecond=0),
+        }
+        datos.update(extra)
+        return Appointment.objects.create(**datos)
+
+    @patch('api.services.resend.Emails.send', return_value={'id': 'test'})
+    def test_envia_solo_citas_dentro_de_3_horas_y_una_vez(self, send):
+        cita = self.crear_cita(2.5)
+        self.crear_cita(5)  # demasiado lejos
+        self.crear_cita(1, email='')  # sin correo
+        self.crear_cita(2, status='cancelada')
+
+        url = reverse('cron_send_reminders')
+        response = self.client.get(url, HTTP_AUTHORIZATION='Bearer secreto-de-prueba')
+        self.assertEqual(response.json(), {'enviados': 1, 'pendientes': 1})
+        response = self.client.get(url, {'token': 'secreto-de-prueba'})
+        self.assertEqual(response.json(), {'enviados': 0, 'pendientes': 0})
+
+        self.assertEqual(send.call_count, 1)
+        params = send.call_args.args[0]
+        self.assertEqual(params['to'], ['paciente@example.com'])
+        self.assertEqual(params['from'], 'PasosSaludables <contacto@pasossaludables.cl>')
+        self.assertIn('Hola <strong>Paciente Prueba</strong>', params['html'])
+        self.assertIn(reverse('confirmar_cita', args=[make_appointment_token(cita)]), params['html'])
+        cita.refresh_from_db()
+        self.assertIsNotNone(cita.reminder_sent_at)
+
+    def test_confirmar(self):
+        cita = self.crear_cita(2)
+        response = self.client.get(reverse('confirmar_cita', args=[make_appointment_token(cita)]))
+        self.assertEqual(response.status_code, 200)
+        cita.refresh_from_db()
+        self.assertEqual(cita.status, 'confirmada')
+
+    def test_cancelar_requiere_post_y_libera_el_horario(self):
+        cita = self.crear_cita(2)
+        url = reverse('cancelar_cita', args=[make_appointment_token(cita)])
+
+        self.client.get(url)
+        cita.refresh_from_db()
+        self.assertEqual(cita.status, 'pendiente')
+
+        self.client.post(url)
+        cita.refresh_from_db()
+        self.assertEqual(cita.status, 'cancelada')
+        # El horario cancelado se puede volver a reservar.
+        self.crear_cita(2, appointment_date=cita.appointment_date, appointment_time=cita.appointment_time)
+
+    def test_token_invalido(self):
+        cita = self.crear_cita(2)
+        response = self.client.get(reverse('confirmar_cita', args=[f'{cita.pk}:falso']))
+        self.assertEqual(response.status_code, 404)
+
+    @patch('api.services.resend.Emails.send')
+    def test_cron_rechaza_token_incorrecto_o_ausente(self, send):
+        self.crear_cita(2)
+        url = reverse('cron_send_reminders')
+        self.assertEqual(self.client.get(url).status_code, 401)
+        self.assertEqual(self.client.get(url, {'token': 'otro'}).status_code, 401)
+        send.assert_not_called()
+
+    @override_settings(CRON_SECRET='')
+    def test_cron_deshabilitado_sin_secreto(self):
+        response = self.client.get(reverse('cron_send_reminders'), {'token': ''})
+        self.assertEqual(response.status_code, 401)

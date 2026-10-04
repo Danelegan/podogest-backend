@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{{ title }} - PasosSaludables</title>
+  <style>
+    body { margin: 0; padding: 16px; background: #f4f6f8; font-family: Arial, Helvetica, sans-serif; color: #222; }
+    .card { max-width: 480px; margin: 48px auto; background: #fff; border-radius: 8px; padding: 32px 24px; text-align: center; }
+    h1 { font-size: 22px; margin-top: 0; }
+    button, .link { display: inline-block; padding: 12px 20px; border: 0; border-radius: 6px; font-size: 16px; text-decoration: none; cursor: pointer; }
+    button { background: #c62828; color: #fff; }
+    .link { color: #555; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>{{ title }}</h1>
+    <p>{{ message }}</p>
+    {% if confirm_cancel %}
+      <form method="post">
+        <button type="submit">Sí, cancelar mi cita</button>
+      </form>
+    {% endif %}
+    <p><a class="link" href="https://www.pasossaludables.cl">Ir a PasosSaludables</a></p>
+  </div>
+</body>
+</html>

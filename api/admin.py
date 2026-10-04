@@ -11,6 +11,8 @@ class AppointmentAdmin(admin.ModelAdmin):
         "appointment_date",
         "appointment_time",
         "service_type",
+        "status",
+        "reminder_sent_at",
     )
     search_fields = ("patient_name", "rut")
-    list_filter = ("appointment_date", "service_type")
+    list_filter = ("status", "appointment_date", "service_type")

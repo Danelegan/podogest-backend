@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recordatorio de Cita - Pasos Saludables</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px;">
+    <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden;">
+        <!-- Header -->
+        <tr>
+            {# El color #0f172a hace juego con el tema oscuro de los botones. El src de la imagen apunta al logo del sitio. #}
+            <td style="background-color: #0f172a; padding: 30px; text-align: center;">
+                <img src="https://www.pasossaludables.cl/logo.png" alt="Pasos Saludables" style="max-height: 50px; margin-bottom: 10px; display: block; margin: 0 auto;">
+                <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-family: 'Arial', sans-serif;">Pasos Saludables</h1>
+            </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+            <td style="padding: 40px 30px; color: #333333; line-height: 1.6;">
+                <p style="font-size: 16px; margin-bottom: 20px;">Hola <strong>{{ nombre_paciente }}</strong>,</p>
+                <p style="font-size: 16px; margin-bottom: 20px;">Este es un recordatorio de que tienes una cita de podología programada en aproximadamente <strong>3 horas</strong>.</p>
+
+                <!-- Detalles de la cita -->
+                <div style="background-color: #f8fafc; padding: 20px; border-radius: 6px; margin-bottom: 30px; border-left: 4px solid #0284c7;">
+                    <p style="margin: 0 0 10px 0; font-size: 16px;"><strong>📅 Fecha:</strong> {{ fecha_cita }}</p>
+                    <p style="margin: 0; font-size: 16px;"><strong>⏰ Hora:</strong> {{ hora_cita }}</p>
+                </div>
+
+                <p style="font-size: 16px; margin-bottom: 30px;">Por favor, confirma tu asistencia o cancela tu cita si no podrás asistir, para que podamos liberar el espacio para otro paciente que lo necesite.</p>
+
+                <!-- Botones -->
+                <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                        <td align="center" style="padding-bottom: 15px;">
+                            <a href="{{ link_confirmar }}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 14px 25px; border-radius: 5px; font-weight: bold; font-size: 16px; width: 80%; max-width: 250px;">✅ Confirmar Asistencia</a>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td align="center">
+                            <a href="{{ link_cancelar }}" style="display: inline-block; background-color: #ef4444; color: #ffffff; text-decoration: none; padding: 14px 25px; border-radius: 5px; font-weight: bold; font-size: 16px; width: 80%; max-width: 250px;">❌ Cancelar Cita</a>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+            <td style="background-color: #f8fafc; padding: 20px; text-align: center; color: #64748b; font-size: 14px; border-top: 1px solid #e2e8f0;">
+                <p style="margin: 0 0 10px 0;"><strong>Pasos Saludables</strong><br>Cuidado profesional para tus pies a domicilio</p>
+                <p style="margin: 0;">Si tienes alguna duda, simplemente responde a este correo.</p>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

@@ -144,6 +144,18 @@ USE_I18N = True
 
 USE_TZ = True
 
+# Las citas se guardan con fecha y hora locales (sin zona); esta es la zona en
+# que se interpretan para calcular cuándo enviar los recordatorios.
+CLINIC_TIME_ZONE = os.environ.get('CLINIC_TIME_ZONE', 'America/Santiago')
+
+# URL pública de este backend, usada para armar los enlaces de los correos.
+# Ej. en Render: SITE_URL=https://podogest-backend.onrender.com (sin '/' final).
+SITE_URL = os.environ.get('SITE_URL', 'http://localhost:8000').rstrip('/')
+
+# Token que debe enviar el cron externo a /api/cron/send-reminders/.
+# Si está vacío, el endpoint rechaza todas las llamadas.
+CRON_SECRET = os.environ.get('CRON_SECRET', '')
+
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
