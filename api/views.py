@@ -50,6 +50,13 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         appointment = serializer.save()
         send_appointment_confirmation(appointment)
 
+    def perform_update(self, serializer):
+        # Cubre PUT y PATCH desde el panel: al cancelar, misma limpieza que el enlace del correo.
+        with transaction.atomic():
+            appointment = serializer.save()
+            if appointment.status == Appointment.Status.CANCELLED:
+                appointment.delete_empty_clinical_record()
+
     @action(detail=False, methods=['post'], url_path='atencion-espontanea')
     def atencion_espontanea(self, request):
         """Registra a un paciente que llega sin reserva: crea la cita ahora mismo y su ficha."""
@@ -183,8 +190,11 @@ def cancelar_cita(request, token):
             'confirm_cancel': True,
         })
 
-    appointment.status = Appointment.Status.CANCELLED
-    appointment.save(update_fields=['status'])
+    with transaction.atomic():
+        appointment.status = Appointment.Status.CANCELLED
+        appointment.save(update_fields=['status'])
+        # El paciente no asistirá: una ficha sin datos clínicos solo sería basura.
+        appointment.delete_empty_clinical_record()
     return _render_result(
         request,
         'Cita cancelada',

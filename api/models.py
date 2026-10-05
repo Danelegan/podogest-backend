@@ -59,6 +59,12 @@ class Appointment(models.Model):
             tzinfo=ZoneInfo(settings.CLINIC_TIME_ZONE),
         )
 
+    def delete_empty_clinical_record(self):
+        """Elimina la ficha si no tiene datos clínicos (se usa al cancelar la cita)."""
+        record = ClinicalRecord.objects.filter(appointment=self).first()
+        if record is not None and record.is_empty():
+            record.delete()
+
 
 class ClinicalRecord(models.Model):
     """Ficha podológica: evaluación clínica asociada a una cita."""
@@ -79,5 +85,13 @@ class ClinicalRecord(models.Model):
     class Meta:
         ordering = ['-created_at']
 
+    # Campos que llena la podóloga; si todos están vacíos la ficha no tiene información.
+    CLINICAL_FIELDS = [
+        'antecedentes_medicos', 'sintomas', 'diagnostico', 'tratamiento_realizado', 'observaciones',
+    ]
+
     def __str__(self):
         return f'Ficha de {self.appointment.patient_name} ({self.appointment.appointment_date})'
+
+    def is_empty(self):
+        return not any((getattr(self, field) or '').strip() for field in self.CLINICAL_FIELDS)

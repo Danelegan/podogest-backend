@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.models import Appointment
+from api.models import Appointment, ClinicalRecord
 from api.services import make_appointment_token
 
 
@@ -134,6 +134,22 @@ class RecordatorioTests(TestCase):
         # El horario cancelado se puede volver a reservar.
         self.crear_cita(2, appointment_date=cita.appointment_date, appointment_time=cita.appointment_time)
 
+    def test_cancelar_elimina_la_ficha_vacia(self):
+        cita = self.crear_cita(2)
+        ClinicalRecord.objects.create(appointment=cita, observaciones='   ')
+        self.client.post(reverse('cancelar_cita', args=[make_appointment_token(cita)]))
+        cita.refresh_from_db()
+        self.assertEqual(cita.status, 'cancelada')
+        self.assertFalse(ClinicalRecord.objects.filter(appointment=cita).exists())
+
+    def test_cancelar_conserva_la_ficha_con_datos(self):
+        cita = self.crear_cita(2)
+        ClinicalRecord.objects.create(appointment=cita, antecedentes_medicos='Diabetes tipo 2')
+        self.client.post(reverse('cancelar_cita', args=[make_appointment_token(cita)]))
+        cita.refresh_from_db()
+        self.assertEqual(cita.status, 'cancelada')
+        self.assertTrue(ClinicalRecord.objects.filter(appointment=cita).exists())
+
     def test_token_invalido(self):
         cita = self.crear_cita(2)
         response = self.client.get(reverse('confirmar_cita', args=[f'{cita.pk}:falso']))
@@ -187,3 +203,53 @@ class AtencionEspontaneaTests(TestCase):
         response = self.client.post(self.url, {**self.datos, 'email': 'no-es-correo'}, format='json')
         self.assertEqual(response.status_code, 400)
         self.assertFalse(Appointment.objects.exists())
+
+
+class EliminarCitaTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.cita = Appointment.objects.create(
+            patient_name='Paciente Prueba', rut='11111111-1', phone='+56911111111',
+            service_type='general', appointment_date=date(2030, 1, 7), appointment_time=time(10, 0),
+        )
+        ClinicalRecord.objects.create(appointment=self.cita, diagnostico='Onicomicosis')
+        self.url = f'/api/appointments/{self.cita.pk}/'
+
+    def test_requiere_autenticacion(self):
+        self.assertEqual(self.client.delete(self.url).status_code, 401)
+        self.assertTrue(Appointment.objects.exists())
+
+    def test_elimina_la_cita_y_su_ficha(self):
+        self.client.force_authenticate(User.objects.create_user('podologa'))
+        self.assertEqual(self.client.delete(self.url).status_code, 204)
+        self.assertFalse(Appointment.objects.exists())
+        self.assertFalse(ClinicalRecord.objects.exists())
+
+
+class CancelarDesdePanelTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(User.objects.create_user('podologa'))
+        self.cita = Appointment.objects.create(
+            patient_name='Paciente Prueba', rut='11111111-1', phone='+56911111111',
+            service_type='general', appointment_date=date(2030, 1, 7), appointment_time=time(10, 0),
+        )
+        self.url = f'/api/appointments/{self.cita.pk}/'
+
+    def test_cancelar_elimina_la_ficha_vacia(self):
+        ClinicalRecord.objects.create(appointment=self.cita)
+        response = self.client.patch(self.url, {'status': 'cancelada'}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.cita.refresh_from_db()
+        self.assertEqual(self.cita.status, 'cancelada')
+        self.assertFalse(ClinicalRecord.objects.exists())
+
+    def test_cancelar_conserva_la_ficha_con_datos(self):
+        ClinicalRecord.objects.create(appointment=self.cita, sintomas='Dolor al caminar')
+        self.client.patch(self.url, {'status': 'cancelada'}, format='json')
+        self.assertTrue(ClinicalRecord.objects.exists())
+
+    def test_otros_cambios_no_tocan_la_ficha(self):
+        ClinicalRecord.objects.create(appointment=self.cita)
+        self.client.patch(self.url, {'status': 'confirmada'}, format='json')
+        self.assertTrue(ClinicalRecord.objects.exists())
