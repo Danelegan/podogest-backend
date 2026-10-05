@@ -232,3 +232,11 @@ REST_FRAMEWORK = {
     # y un atacante podría falsearlo para saltarse el límite.
     'NUM_PROXIES': int(os.environ.get('NUM_PROXIES', '1')),
 }
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'loggers': {
+        'django.request': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+    },
+}
