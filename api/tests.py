@@ -10,6 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from api.models import Appointment
 from api.services import make_appointment_token
 
 
@@ -150,3 +151,39 @@ class RecordatorioTests(TestCase):
     def test_cron_deshabilitado_sin_secreto(self):
         response = self.client.get(reverse('cron_send_reminders'), {'token': ''})
         self.assertEqual(response.status_code, 401)
+
+
+class AtencionEspontaneaTests(TestCase):
+    url = '/api/appointments/atencion-espontanea/'
+    datos = {
+        'patient_name': 'Paciente Espontáneo',
+        'rut': '22222222-2',
+        'phone': '+56922222222',
+        'email': 'espontaneo@example.com',
+    }
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_requiere_autenticacion(self):
+        response = self.client.post(self.url, self.datos, format='json')
+        self.assertEqual(response.status_code, 401)
+
+    @patch('api.services.resend.Emails.send')
+    def test_crea_cita_ahora_y_su_ficha(self, send):
+        self.client.force_authenticate(User.objects.create_user('podologa'))
+        response = self.client.post(self.url, self.datos, format='json')
+        self.assertEqual(response.status_code, 201)
+
+        cita = Appointment.objects.get(pk=response.data['appointment']['id'])
+        self.assertEqual(cita.status, 'confirmada')
+        self.assertEqual(cita.service_type, 'general')
+        self.assertLess(abs((timezone.now() - cita.starts_at).total_seconds()), 5)
+        self.assertEqual(response.data['clinical_record']['id'], cita.clinical_record.pk)
+        send.assert_not_called()
+
+    def test_datos_invalidos_no_crean_nada(self):
+        self.client.force_authenticate(User.objects.create_user('podologa'))
+        response = self.client.post(self.url, {**self.datos, 'email': 'no-es-correo'}, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Appointment.objects.exists())

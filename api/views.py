@@ -1,12 +1,14 @@
 import hmac
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
+from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_http_methods
-from rest_framework import viewsets
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -47,6 +49,36 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         appointment = serializer.save()
         send_appointment_confirmation(appointment)
+
+    @action(detail=False, methods=['post'], url_path='atencion-espontanea')
+    def atencion_espontanea(self, request):
+        """Registra a un paciente que llega sin reserva: crea la cita ahora mismo y su ficha."""
+        # Hora local de la clínica; con segundos para no chocar con los bloques
+        # reservados (que van en horas exactas) ni con otro espontáneo del mismo minuto.
+        now = timezone.localtime(timezone.now(), ZoneInfo(settings.CLINIC_TIME_ZONE))
+        serializer = self.get_serializer(data={
+            'patient_name': request.data.get('patient_name'),
+            'rut': request.data.get('rut'),
+            'phone': request.data.get('phone'),
+            'email': request.data.get('email', ''),
+            'service_type': request.data.get('service_type') or Appointment.ServiceType.GENERAL,
+            'appointment_date': now.date(),
+            'appointment_time': now.time().replace(microsecond=0),
+            # El paciente ya está presente: no requiere confirmación.
+            'status': Appointment.Status.CONFIRMED,
+        })
+        serializer.is_valid(raise_exception=True)
+
+        # Sin correo de confirmación: la atención es inmediata. Tampoco recibe
+        # recordatorio, porque el cron solo toma citas que aún no empiezan.
+        with transaction.atomic():
+            appointment = serializer.save()
+            record = ClinicalRecord.objects.create(appointment=appointment)
+
+        return Response({
+            'appointment': serializer.data,
+            'clinical_record': ClinicalRecordSerializer(record).data,
+        }, status=status.HTTP_201_CREATED)
 
 
 class ClinicalRecordViewSet(viewsets.ModelViewSet):
