@@ -194,6 +194,10 @@ CORS_ALLOWED_ORIGINS += [
     if url.strip()
 ]
 
+# Permite al frontend leer el nombre del archivo del respaldo CSV
+# (el navegador oculta esta cabecera en peticiones cross-origin si no se expone).
+CORS_EXPOSE_HEADERS = ['Content-Disposition']
+
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration

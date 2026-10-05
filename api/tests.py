@@ -1,3 +1,5 @@
+import csv
+import io
 from datetime import date, time, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -253,3 +255,49 @@ class CancelarDesdePanelTests(TestCase):
         ClinicalRecord.objects.create(appointment=self.cita)
         self.client.patch(self.url, {'status': 'confirmada'}, format='json')
         self.assertTrue(ClinicalRecord.objects.exists())
+
+
+class ExportarRespaldoTests(TestCase):
+    url = '/api/appointments/exportar-respaldo/'
+
+    def setUp(self):
+        self.client = APIClient()
+        datos = {'rut': '11111111-1', 'phone': '912345678', 'service_type': 'general',
+                 'appointment_date': date(2030, 1, 7)}
+        con_ficha = Appointment.objects.create(
+            patient_name='Ana Pérez', email='ana@example.com', appointment_time=time(10, 0), **datos,
+        )
+        ClinicalRecord.objects.create(appointment=con_ficha, diagnostico='Onicomicosis')
+        Appointment.objects.create(
+            patient_name='=HYPERLINK("http://malo")', appointment_time=time(11, 0),
+            status='cancelada', **datos,
+        )
+
+    def test_requiere_autenticacion(self):
+        self.assertEqual(self.client.get(self.url).status_code, 401)
+
+    def test_descarga_citas_con_su_ficha(self):
+        self.client.force_authenticate(User.objects.create_user('podologa'))
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'text/csv; charset=utf-8')
+        self.assertRegex(
+            response['Content-Disposition'],
+            r'attachment; filename="respaldo_pasos_saludables_\d{8}\.csv"',
+        )
+
+        content = response.content.decode('utf-8-sig')
+        filas = list(csv.reader(io.StringIO(content), delimiter=';'))
+        self.assertEqual(filas[0][:3], ['Fecha', 'Hora', 'Estado'])
+        self.assertEqual(filas[1], [
+            '07-01-2030', '10:00', 'Pendiente', 'Ana Pérez', '11111111-1', 'ana@example.com',
+            '912345678', '', '', 'Onicomicosis', '', '',
+        ])
+        # Sin ficha: columnas clínicas vacías; el texto que parece fórmula se neutraliza.
+        self.assertEqual(filas[2][2:4], ['Cancelada', '\'=HYPERLINK("http://malo")'])
+        self.assertEqual(filas[2][7:], [''] * 5)
+
+    def test_expone_el_nombre_del_archivo_al_frontend(self):
+        self.client.force_authenticate(User.objects.create_user('podologa'))
+        response = self.client.get(self.url, HTTP_ORIGIN='https://podogest-frontend.vercel.app')
+        self.assertIn('Content-Disposition', response['Access-Control-Expose-Headers'])

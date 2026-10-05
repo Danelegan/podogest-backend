@@ -1,9 +1,10 @@
+import csv
 import hmac
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db import transaction
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -17,6 +18,15 @@ from .models import Appointment, ClinicalRecord
 from .serializers import AppointmentSerializer, ClinicalRecordSerializer
 from .services import read_appointment_token, send_appointment_confirmation, send_due_reminders
 from .throttles import ReservaBurstThrottle, ReservaSustainedThrottle
+
+
+def _csv_safe(value):
+    # Los datos vienen del formulario público: un valor como "=HYPERLINK(...)"
+    # se ejecutaría como fórmula al abrir el CSV en Excel.
+    value = '' if value is None else str(value)
+    if value.startswith(('=', '+', '-', '@', '\t', '\r')):
+        return "'" + value
+    return value
 
 
 class AppointmentViewSet(viewsets.ModelViewSet):
@@ -56,6 +66,37 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             appointment = serializer.save()
             if appointment.status == Appointment.Status.CANCELLED:
                 appointment.delete_empty_clinical_record()
+
+    @action(detail=False, methods=['get'], url_path='exportar-respaldo')
+    def exportar_respaldo(self, request):
+        """Descarga todas las citas con su ficha en un CSV (respaldo manual)."""
+        today = timezone.localtime(timezone.now(), ZoneInfo(settings.CLINIC_TIME_ZONE)).date()
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = (
+            f'attachment; filename="respaldo_pasos_saludables_{today:%Y%m%d}.csv"'
+        )
+        # BOM y ';' para que Excel en español muestre bien tildes y columnas.
+        response.write('﻿')
+        writer = csv.writer(response, delimiter=';')
+        writer.writerow([
+            'Fecha', 'Hora', 'Estado', 'Nombre', 'RUT', 'Email', 'Teléfono',
+            'Antecedentes', 'Síntomas', 'Diagnóstico', 'Tratamiento', 'Observaciones',
+        ])
+
+        for appointment in self.get_queryset().select_related('clinical_record'):
+            # Las citas sin ficha dejan esas columnas en blanco.
+            record = getattr(appointment, 'clinical_record', None)
+            writer.writerow([_csv_safe(value) for value in [
+                f'{appointment.appointment_date:%d-%m-%Y}',
+                f'{appointment.appointment_time:%H:%M}',
+                appointment.get_status_display(),
+                appointment.patient_name,
+                appointment.rut,
+                appointment.email,
+                appointment.phone,
+                *[getattr(record, field) if record else '' for field in ClinicalRecord.CLINICAL_FIELDS],
+            ]])
+        return response
 
     @action(detail=False, methods=['post'], url_path='atencion-espontanea')
     def atencion_espontanea(self, request):
