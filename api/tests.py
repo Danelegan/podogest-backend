@@ -1,4 +1,3 @@
-import csv
 import io
 from datetime import date, time, timedelta
 from unittest.mock import patch
@@ -10,10 +9,12 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 from rest_framework.test import APIClient
 
 from api.models import Appointment, ClinicalRecord
 from api.services import make_appointment_token
+from api.views import _clean_observaciones
 
 
 def reserva(hour):
@@ -276,26 +277,44 @@ class ExportarRespaldoTests(TestCase):
     def test_requiere_autenticacion(self):
         self.assertEqual(self.client.get(self.url).status_code, 401)
 
-    def test_descarga_citas_con_su_ficha(self):
+    def test_descarga_citas_con_su_ficha_en_excel(self):
+        ClinicalRecord.objects.filter(diagnostico='Onicomicosis').update(
+            observaciones='Uña engrosada|||DRAWING:data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==',
+        )
         self.client.force_authenticate(User.objects.create_user('podologa'))
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Type'], 'text/csv; charset=utf-8')
+        self.assertEqual(
+            response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
         self.assertRegex(
             response['Content-Disposition'],
-            r'attachment; filename="respaldo_pasos_saludables_\d{8}\.csv"',
+            r'attachment; filename="respaldo_pasos_saludables_\d{8}\.xlsx"',
         )
 
-        content = response.content.decode('utf-8-sig')
-        filas = list(csv.reader(io.StringIO(content), delimiter=';'))
+        sheet = load_workbook(io.BytesIO(response.content)).active
+        filas = [[cell.value for cell in row] for row in sheet.iter_rows()]
         self.assertEqual(filas[0][:3], ['Fecha', 'Hora', 'Estado'])
-        self.assertEqual(filas[1], [
-            '07-01-2030', '10:00', 'Pendiente', 'Ana Pérez', '11111111-1', 'ana@example.com',
-            '912345678', '', '', 'Onicomicosis', '', '',
+        self.assertEqual(sheet['A1'].font.color.rgb, '00FFFFFF')
+        self.assertEqual(filas[1][0].date(), date(2030, 1, 7))
+        self.assertEqual(filas[1][1], time(10, 0))
+        self.assertEqual(filas[1][2:], [
+            'Pendiente', 'Ana Pérez', '11111111-1', 'ana@example.com', '912345678',
+            None, None, 'Onicomicosis', None,
+            'Uña engrosada\n[Podograma guardado en sistema]',
         ])
-        # Sin ficha: columnas clínicas vacías; el texto que parece fórmula se neutraliza.
-        self.assertEqual(filas[2][2:4], ['Cancelada', '\'=HYPERLINK("http://malo")'])
-        self.assertEqual(filas[2][7:], [''] * 5)
+        # Sin ficha: columnas clínicas vacías; el texto que parece fórmula queda como texto.
+        self.assertEqual(filas[2][2:4], ['Cancelada', '=HYPERLINK("http://malo")'])
+        self.assertEqual(sheet['D3'].data_type, 's')
+        self.assertEqual(filas[2][7:], [None] * 5)
+
+    def test_observaciones_solo_con_podograma(self):
+        self.assertEqual(
+            _clean_observaciones('|||DRAWING:data:image/png;base64,AAAA'),
+            '[Podograma guardado en sistema]',
+        )
+        self.assertEqual(_clean_observaciones('Sin dibujo'), 'Sin dibujo')
 
     def test_expone_el_nombre_del_archivo_al_frontend(self):
         self.client.force_authenticate(User.objects.create_user('podologa'))

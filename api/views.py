@@ -1,5 +1,5 @@
-import csv
 import hmac
+import re
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -9,6 +9,9 @@ from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_http_methods
+from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+from openpyxl.styles import Alignment, Font, PatternFill
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -20,13 +23,30 @@ from .services import read_appointment_token, send_appointment_confirmation, sen
 from .throttles import ReservaBurstThrottle, ReservaSustainedThrottle
 
 
-def _csv_safe(value):
-    # Los datos vienen del formulario público: un valor como "=HYPERLINK(...)"
-    # se ejecutaría como fórmula al abrir el CSV en Excel.
-    value = '' if value is None else str(value)
-    if value.startswith(('=', '+', '-', '@', '\t', '\r')):
-        return "'" + value
-    return value
+# Encabezados del respaldo y su ancho máximo de columna en Excel.
+BACKUP_COLUMNS = [
+    'Fecha', 'Hora', 'Estado', 'Nombre', 'RUT', 'Email', 'Teléfono',
+    'Antecedentes', 'Síntomas', 'Diagnóstico', 'Tratamiento', 'Observaciones',
+]
+BACKUP_MAX_WIDTH = 50
+
+# El frontend guarda el podograma dentro de Observaciones como
+# "<texto>|||DRAWING:data:image/png;base64,...".
+DRAWING_RE = re.compile(r'\|\|\|DRAWING:\S*')
+
+
+def _clean_observaciones(text):
+    """Quita la imagen en base64 del podograma y deja solo el texto de la podóloga."""
+    if not text or '|||DRAWING:' not in text:
+        return text
+    text = DRAWING_RE.sub('', text).strip()
+    note = '[Podograma guardado en sistema]'
+    return f'{text}\n{note}' if text else note
+
+
+def _excel_text(value):
+    # openpyxl rechaza caracteres de control que podrían venir del formulario público.
+    return ILLEGAL_CHARACTERS_RE.sub('', value) if isinstance(value, str) else value
 
 
 class AppointmentViewSet(viewsets.ModelViewSet):
@@ -69,33 +89,63 @@ class AppointmentViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='exportar-respaldo')
     def exportar_respaldo(self, request):
-        """Descarga todas las citas con su ficha en un CSV (respaldo manual)."""
-        today = timezone.localtime(timezone.now(), ZoneInfo(settings.CLINIC_TIME_ZONE)).date()
-        response = HttpResponse(content_type='text/csv; charset=utf-8')
-        response['Content-Disposition'] = (
-            f'attachment; filename="respaldo_pasos_saludables_{today:%Y%m%d}.csv"'
-        )
-        # BOM y ';' para que Excel en español muestre bien tildes y columnas.
-        response.write('﻿')
-        writer = csv.writer(response, delimiter=';')
-        writer.writerow([
-            'Fecha', 'Hora', 'Estado', 'Nombre', 'RUT', 'Email', 'Teléfono',
-            'Antecedentes', 'Síntomas', 'Diagnóstico', 'Tratamiento', 'Observaciones',
-        ])
+        """Descarga todas las citas con su ficha en un Excel (respaldo manual)."""
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = 'Respaldo'
+        sheet.append(BACKUP_COLUMNS)
 
         for appointment in self.get_queryset().select_related('clinical_record'):
             # Las citas sin ficha dejan esas columnas en blanco.
             record = getattr(appointment, 'clinical_record', None)
-            writer.writerow([_csv_safe(value) for value in [
-                f'{appointment.appointment_date:%d-%m-%Y}',
-                f'{appointment.appointment_time:%H:%M}',
+            clinical = [getattr(record, field) if record else None for field in ClinicalRecord.CLINICAL_FIELDS]
+            clinical[-1] = _clean_observaciones(clinical[-1])
+            sheet.append([_excel_text(value) for value in [
+                appointment.appointment_date,
+                appointment.appointment_time,
                 appointment.get_status_display(),
                 appointment.patient_name,
                 appointment.rut,
                 appointment.email,
                 appointment.phone,
-                *[getattr(record, field) if record else '' for field in ClinicalRecord.CLINICAL_FIELDS],
+                *clinical,
             ]])
+
+        for cell in sheet['A'][1:]:
+            cell.number_format = 'DD-MM-YYYY'
+        for cell in sheet['B'][1:]:
+            cell.number_format = 'HH:MM'
+        for row in sheet.iter_rows(min_row=2):
+            for cell in row:
+                # Los datos vienen del formulario público: un texto como "=HYPERLINK(...)"
+                # se guarda como texto y no como fórmula.
+                if cell.data_type == 'f':
+                    cell.data_type = 's'
+                cell.alignment = Alignment(vertical='top', wrap_text=True)
+
+        header_fill = PatternFill('solid', fgColor='0284C7')
+        for cell in sheet[1]:
+            cell.font = Font(bold=True, color='FFFFFF')
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+        sheet.freeze_panes = 'A2'
+
+        for column in sheet.columns:
+            lengths = [
+                max(len(line) for line in str(cell.value).splitlines() or [''])
+                for cell in column if cell.value is not None
+            ]
+            width = min(max(lengths, default=0) + 2, BACKUP_MAX_WIDTH)
+            sheet.column_dimensions[column[0].column_letter].width = max(width, 12)
+
+        today = timezone.localtime(timezone.now(), ZoneInfo(settings.CLINIC_TIME_ZONE)).date()
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="respaldo_pasos_saludables_{today:%Y%m%d}.xlsx"'
+        )
+        workbook.save(response)
         return response
 
     @action(detail=False, methods=['post'], url_path='atencion-espontanea')
