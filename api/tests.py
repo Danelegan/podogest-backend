@@ -258,6 +258,27 @@ class CancelarDesdePanelTests(TestCase):
         self.assertTrue(ClinicalRecord.objects.exists())
 
 
+class FichaUnicaPorCitaTests(TestCase):
+    url = '/api/clinical-records/'
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(User.objects.create_user('podologa'))
+        self.cita = Appointment.objects.create(
+            patient_name='Paciente Prueba', rut='11111111-1', phone='+56911111111',
+            service_type='general', appointment_date=date(2030, 1, 7), appointment_time=time(10, 0),
+        )
+
+    def test_segunda_ficha_para_la_misma_cita_es_rechazada(self):
+        primera = self.client.post(self.url, {'appointment': self.cita.pk, 'sintomas': 'Dolor'}, format='json')
+        self.assertEqual(primera.status_code, 201)
+
+        segunda = self.client.post(self.url, {'appointment': self.cita.pk, 'sintomas': 'Otro'}, format='json')
+        self.assertEqual(segunda.status_code, 400)
+        self.assertIn('appointment', segunda.data)
+        self.assertEqual(ClinicalRecord.objects.filter(appointment=self.cita).count(), 1)
+
+
 class ExportarRespaldoTests(TestCase):
     url = '/api/appointments/exportar-respaldo/'
 
