@@ -309,6 +309,23 @@ class ExportarRespaldoTests(TestCase):
         self.assertEqual(sheet['D3'].data_type, 's')
         self.assertEqual(filas[2][7:], [None] * 5)
 
+    def test_ningun_texto_se_exporta_como_formula(self):
+        formula = '=HYPERLINK("http://malo","clic")'
+        cita = Appointment.objects.create(
+            patient_name=formula, rut='=1+1', phone='=1+1', service_type='general',
+            appointment_date=date(2030, 1, 8), appointment_time=time(9, 0),
+        )
+        ClinicalRecord.objects.create(
+            appointment=cita, **{field: formula for field in ClinicalRecord.CLINICAL_FIELDS},
+        )
+        self.client.force_authenticate(User.objects.create_user('podologa'))
+        sheet = load_workbook(io.BytesIO(self.client.get(self.url).content)).active
+
+        formulas = [cell.coordinate for row in sheet.iter_rows() for cell in row if cell.data_type == 'f']
+        self.assertEqual(formulas, [])
+        fila = next(row for row in sheet.iter_rows(min_row=2) if row[4].value == '=1+1')
+        self.assertEqual([cell.value for cell in fila[7:]], [formula] * 5)
+
     def test_observaciones_solo_con_podograma(self):
         self.assertEqual(
             _clean_observaciones('|||DRAWING:data:image/png;base64,AAAA'),
