@@ -14,6 +14,7 @@ from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font, PatternFill
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
@@ -191,6 +192,10 @@ class ClinicalRecordViewSet(viewsets.ModelViewSet):
         # Permite buscar la ficha de una cita: /api/clinical-records/?appointment=<id>
         appointment_id = self.request.query_params.get('appointment')
         if appointment_id:
+            try:
+                appointment_id = int(appointment_id)
+            except ValueError:
+                raise ValidationError({'appointment': 'Debe ser el ID numérico de la cita.'})
             queryset = queryset.filter(appointment_id=appointment_id)
         return queryset
 

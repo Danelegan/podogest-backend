@@ -278,6 +278,28 @@ class FichaUnicaPorCitaTests(TestCase):
         self.assertIn('appointment', segunda.data)
         self.assertEqual(ClinicalRecord.objects.filter(appointment=self.cita).count(), 1)
 
+    def test_filtra_fichas_por_cita(self):
+        otra_cita = Appointment.objects.create(
+            patient_name='Otro Paciente', rut='22222222-2', phone='+56922222222',
+            service_type='general', appointment_date=date(2030, 1, 7), appointment_time=time(11, 0),
+        )
+        ficha = ClinicalRecord.objects.create(appointment=self.cita, diagnostico='Onicomicosis')
+        ClinicalRecord.objects.create(appointment=otra_cita, diagnostico='Verruga plantar')
+
+        response = self.client.get(self.url, {'appointment': self.cita.pk})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], ficha.pk)
+        self.assertEqual(response.data[0]['appointment'], self.cita.pk)
+
+        # Sin el parámetro se listan todas las fichas.
+        self.assertEqual(len(self.client.get(self.url).data), 2)
+
+    def test_filtro_por_cita_no_numerico_devuelve_400(self):
+        response = self.client.get(self.url, {'appointment': 'abc'})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'appointment': 'Debe ser el ID numérico de la cita.'})
+
 
 class ExportarRespaldoTests(TestCase):
     url = '/api/appointments/exportar-respaldo/'
