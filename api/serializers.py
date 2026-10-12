@@ -29,6 +29,20 @@ class AppointmentSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class PublicAppointmentSerializer(AppointmentSerializer):
+    """Reserva desde el sitio público: solo los campos del formulario (BookingModal.jsx).
+
+    Los campos internos (status, reminder_sent_at...) no se aceptan; DRF ignora
+    cualquier campo extra que venga en la petición.
+    """
+
+    class Meta(AppointmentSerializer.Meta):
+        fields = [
+            'patient_name', 'rut', 'phone', 'email', 'service_type',
+            'appointment_date', 'appointment_time',
+        ]
+
+
 class ClinicalRecordSerializer(serializers.ModelSerializer):
     # Datos de solo lectura de la cita para mostrar la ficha sin otra consulta.
     patient_name = serializers.CharField(source='appointment.patient_name', read_only=True)

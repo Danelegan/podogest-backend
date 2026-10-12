@@ -1,3 +1,4 @@
+import importlib
 import io
 from datetime import date, time, timedelta
 from unittest.mock import patch
@@ -8,14 +9,16 @@ from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.db import OperationalError
 from django.test import TestCase, override_settings
-from django.urls import reverse
+from django.urls import clear_url_caches, reverse
 from django.utils import timezone
 from openpyxl import load_workbook
 from rest_framework.test import APIClient
+from rest_framework.throttling import AnonRateThrottle
 
 from api.models import Appointment, ClinicalRecord
 from api.services import make_appointment_token
 from api.views import _clean_observaciones
+import core.urls
 
 
 def reserva(hour):
@@ -403,3 +406,111 @@ class HealthCheckTests(TestCase):
         for _ in range(105):
             response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
+
+
+class ReservaPublicaTests(TestCase):
+    url = '/api/appointments/'
+    # Exactamente lo que envía BookingModal.jsx del frontend.
+    formulario = {**reserva(10), 'email': 'paciente@example.com'}
+
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+
+    @patch('api.services.resend.Emails.send')
+    def test_acepta_el_formulario_del_sitio(self, send):
+        response = self.client.post(self.url, self.formulario, format='json')
+        self.assertEqual(response.status_code, 201)
+        cita = Appointment.objects.get()
+        self.assertEqual(cita.status, 'pendiente')
+        self.assertEqual(cita.email, 'paciente@example.com')
+        send.assert_called_once()
+
+    @patch('api.services.resend.Emails.send')
+    def test_ignora_campos_internos(self, send):
+        response = self.client.post(self.url, {
+            **self.formulario,
+            'status': 'confirmada',
+            'reminder_sent_at': '2030-01-01T00:00:00Z',
+        }, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertNotIn('status', response.data)
+        cita = Appointment.objects.get()
+        self.assertEqual(cita.status, 'pendiente')
+        self.assertIsNone(cita.reminder_sent_at)
+
+    @patch('api.services.resend.Emails.send')
+    def test_el_panel_autenticado_puede_fijar_el_estado(self, send):
+        self.client.force_authenticate(User.objects.create_user('podologa'))
+        response = self.client.post(self.url, {**self.formulario, 'status': 'confirmada'}, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Appointment.objects.get().status, 'confirmada')
+
+
+class LoginThrottleTests(TestCase):
+    url = '/api/token/'
+    credenciales = {'username': 'podologa', 'password': 'incorrecta'}
+
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+        self.ahora = 1_000_000.0
+        reloj = patch('rest_framework.throttling.SimpleRateThrottle.timer', lambda _: self.ahora)
+        reloj.start()
+        self.addCleanup(reloj.stop)
+
+    def intentar(self):
+        return self.client.post(self.url, self.credenciales, format='json').status_code
+
+    def test_login_limitado_a_5_por_minuto(self):
+        for _ in range(5):
+            self.assertEqual(self.intentar(), 401)
+        self.assertEqual(self.intentar(), 429)
+        self.ahora += 61
+        self.assertEqual(self.intentar(), 401)
+
+    def test_login_limitado_a_20_por_hora(self):
+        for _ in range(4):
+            for _ in range(5):
+                self.assertEqual(self.intentar(), 401)
+            self.ahora += 61
+        self.assertEqual(self.intentar(), 429)
+        self.ahora += 3600
+        self.assertEqual(self.intentar(), 401)
+
+    def test_login_correcto_sigue_funcionando(self):
+        User.objects.create_user('podologa', password='clave-segura-123')
+        response = self.client.post(
+            self.url, {'username': 'podologa', 'password': 'clave-segura-123'}, format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('access', response.data)
+
+    def test_separado_del_cupo_anonimo(self):
+        with patch.dict(AnonRateThrottle.THROTTLE_RATES, {'anon': '1/min'}):
+            self.assertEqual(self.client.get('/api/appointments/horarios-ocupados/').status_code, 200)
+            self.assertEqual(self.client.get('/api/appointments/horarios-ocupados/').status_code, 429)
+            # El cupo anónimo agotado no bloquea el login...
+            self.assertEqual(self.intentar(), 401)
+        # ...y el login tampoco gasta el cupo anónimo.
+        cache.clear()
+        for _ in range(5):
+            self.intentar()
+        with patch.dict(AnonRateThrottle.THROTTLE_RATES, {'anon': '1/min'}):
+            self.assertEqual(self.client.get('/api/appointments/horarios-ocupados/').status_code, 200)
+
+
+class AdminSoloEnDesarrolloTests(TestCase):
+    def rutas_con_debug(self, debug):
+        with override_settings(DEBUG=debug):
+            rutas = [str(p.pattern) for p in importlib.reload(core.urls).urlpatterns]
+        importlib.reload(core.urls)
+        clear_url_caches()
+        return rutas
+
+    def test_admin_no_existe_en_produccion(self):
+        self.assertEqual(self.client.get('/admin/').status_code, 404)
+        self.assertNotIn('admin/', self.rutas_con_debug(False))
+
+    def test_admin_existe_en_desarrollo(self):
+        self.assertIn('admin/', self.rutas_con_debug(True))

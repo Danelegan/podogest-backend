@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 
 import dj_database_url
@@ -132,6 +133,11 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# Solo al ejecutar `manage.py test`: un hasher rápido (e inseguro) para que los
+# tests de login no tarden. Nunca se usa en desarrollo ni en producción.
+if sys.argv[1:2] == ['test']:
+    PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
+
 
 # Internationalization
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
@@ -220,8 +226,8 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
-    # Rate limiting: límite general para cualquier petición anónima
-    # (incluye /api/token/, lo que frena ataques de fuerza bruta al login).
+    # Rate limiting: límite general para cualquier petición anónima.
+    # /api/token/ no lo usa: tiene su propio límite (login_*), ver api/throttles.py.
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
     ],
@@ -230,6 +236,9 @@ REST_FRAMEWORK = {
         # Límites estrictos solo para crear reservas (ver api/throttles.py).
         'reservas_burst': '5/min',
         'reservas_sustained': '20/hour',
+        # Límites del login del panel (/api/token/), por IP.
+        'login_burst': '5/min',
+        'login_sustained': '20/hour',
     },
     # Número de proxies delante de Django: 1 por defecto (Render). Ajustable con
     # la variable NUM_PROXIES. Sin esto, DRF confía en X-Forwarded-For completo

@@ -19,11 +19,17 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .models import Appointment, ClinicalRecord
-from .serializers import AppointmentSerializer, ClinicalRecordSerializer
+from .serializers import AppointmentSerializer, ClinicalRecordSerializer, PublicAppointmentSerializer
 from .services import read_appointment_token, send_appointment_confirmation, send_due_reminders
-from .throttles import ReservaBurstThrottle, ReservaSustainedThrottle
+from .throttles import (
+    LoginBurstThrottle,
+    LoginSustainedThrottle,
+    ReservaBurstThrottle,
+    ReservaSustainedThrottle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +77,12 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             return [*super().get_throttles(), ReservaBurstThrottle(), ReservaSustainedThrottle()]
         return super().get_throttles()
 
+    def get_serializer_class(self):
+        # La reserva anónima solo acepta los campos del formulario público.
+        if self.action == 'create' and not self.request.user.is_authenticated:
+            return PublicAppointmentSerializer
+        return super().get_serializer_class()
+
     @action(detail=False, methods=['get'], url_path='horarios-ocupados')
     def horarios_ocupados(self, request):
         # Solo fecha y hora, sin datos personales, para bloquearlas en el calendario.
@@ -82,7 +94,11 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         return Response(list(citas))
 
     def perform_create(self, serializer):
-        appointment = serializer.save()
+        if self.request.user.is_authenticated:
+            appointment = serializer.save()
+        else:
+            # Una reserva pública siempre nace pendiente de confirmación.
+            appointment = serializer.save(status=Appointment.Status.PENDING)
         send_appointment_confirmation(appointment)
 
     def perform_update(self, serializer):
@@ -202,6 +218,14 @@ class ClinicalRecordViewSet(viewsets.ModelViewSet):
                 raise ValidationError({'appointment': 'Debe ser el ID numérico de la cita.'})
             queryset = queryset.filter(appointment_id=appointment_id)
         return queryset
+
+
+class LoginView(TokenObtainPairView):
+    """Login del panel (JWT) con su propio límite por IP, separado del cupo anónimo."""
+
+    throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
+    throttle_scope_burst = 'login_burst'
+    throttle_scope_sustained = 'login_sustained'
 
 
 # --- Enlaces del correo de recordatorio -------------------------------------
