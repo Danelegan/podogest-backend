@@ -226,6 +226,11 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
+    # Todo exige JWT salvo que la vista declare otro permiso explícitamente
+    # (reserva pública, horarios ocupados, login y refresh: ver api/views.py y core/urls.py).
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
     # Rate limiting: límite general para cualquier petición anónima.
     # /api/token/ no lo usa: tiene su propio límite (login_*), ver api/throttles.py.
     'DEFAULT_THROTTLE_CLASSES': [

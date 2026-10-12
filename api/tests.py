@@ -514,3 +514,86 @@ class AdminSoloEnDesarrolloTests(TestCase):
 
     def test_admin_existe_en_desarrollo(self):
         self.assertIn('admin/', self.rutas_con_debug(True))
+
+
+class PermisosTests(TestCase):
+    """Con IsAuthenticated por defecto, solo lo público a propósito queda abierto."""
+
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+        self.cita = Appointment.objects.create(
+            patient_name='Paciente Prueba', rut='11111111-1', phone='+56911111111',
+            service_type='general', appointment_date=date(2030, 1, 7), appointment_time=time(10, 0),
+        )
+        self.ficha = ClinicalRecord.objects.create(appointment=self.cita)
+
+    # --- Públicos a propósito ---
+
+    def test_crear_reserva_es_publico(self):
+        response = self.client.post('/api/appointments/', reserva(11), format='json')
+        self.assertEqual(response.status_code, 201)
+
+    def test_horarios_ocupados_es_publico(self):
+        self.assertEqual(self.client.get('/api/appointments/horarios-ocupados/').status_code, 200)
+
+    def test_confirmar_y_cancelar_solo_piden_el_token_firmado(self):
+        token = make_appointment_token(self.cita)
+        self.assertEqual(self.client.get(reverse('cancelar_cita', args=[token])).status_code, 200)
+        self.assertEqual(self.client.get(reverse('confirmar_cita', args=[token])).status_code, 200)
+        self.assertEqual(self.client.get(reverse('confirmar_cita', args=['malo'])).status_code, 404)
+
+    @override_settings(CRON_SECRET='secreto-de-prueba')
+    @patch('api.views.send_due_reminders', return_value=(0, 0))
+    def test_cron_solo_pide_su_secreto(self, _):
+        url = reverse('cron_send_reminders')
+        self.assertEqual(self.client.get(url).status_code, 401)
+        response = self.client.get(url, HTTP_AUTHORIZATION='Bearer secreto-de-prueba')
+        self.assertEqual(response.status_code, 200)
+
+    def test_health_es_publico(self):
+        self.assertEqual(self.client.get('/api/health/').status_code, 200)
+
+    def test_login_y_refresh_son_publicos(self):
+        User.objects.create_user('podologa', password='clave-segura-123')
+        login = self.client.post('/api/token/', {'username': 'podologa', 'password': 'clave-segura-123'},
+                                 format='json')
+        self.assertEqual(login.status_code, 200)
+        refresh = self.client.post('/api/token/refresh/', {'refresh': login.data['refresh']}, format='json')
+        self.assertEqual(refresh.status_code, 200)
+
+    # --- Todo lo demás exige JWT ---
+
+    def test_el_resto_exige_jwt(self):
+        cita, ficha = f'/api/appointments/{self.cita.pk}/', f'/api/clinical-records/{self.ficha.pk}/'
+        peticiones = [
+            ('get', '/api/'),
+            ('get', '/api/appointments/'),
+            ('get', cita),
+            ('patch', cita),
+            ('put', cita),
+            ('delete', cita),
+            ('get', '/api/appointments/exportar-respaldo/'),
+            ('post', '/api/appointments/atencion-espontanea/'),
+            ('get', '/api/clinical-records/'),
+            ('post', '/api/clinical-records/'),
+            ('get', ficha),
+            ('patch', ficha),
+            ('put', ficha),
+            ('delete', ficha),
+        ]
+        for metodo, url in peticiones:
+            with self.subTest(metodo=metodo, url=url):
+                response = getattr(self.client, metodo)(url, {}, format='json')
+                self.assertEqual(response.status_code, 401)
+        self.assertTrue(Appointment.objects.filter(pk=self.cita.pk).exists())
+        self.assertTrue(ClinicalRecord.objects.filter(pk=self.ficha.pk).exists())
+
+    def test_con_jwt_real_el_panel_funciona(self):
+        User.objects.create_user('podologa', password='clave-segura-123')
+        login = self.client.post('/api/token/', {'username': 'podologa', 'password': 'clave-segura-123'},
+                                 format='json')
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {login.data["access"]}')
+        self.assertEqual(self.client.get('/api/appointments/').status_code, 200)
+        self.assertEqual(self.client.get('/api/clinical-records/').status_code, 200)
+        self.assertEqual(self.client.get('/api/').status_code, 200)

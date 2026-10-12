@@ -223,6 +223,7 @@ class ClinicalRecordViewSet(viewsets.ModelViewSet):
 class LoginView(TokenObtainPairView):
     """Login del panel (JWT) con su propio límite por IP, separado del cupo anónimo."""
 
+    permission_classes = [AllowAny]
     throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
     throttle_scope_burst = 'login_burst'
     throttle_scope_sustained = 'login_sustained'
