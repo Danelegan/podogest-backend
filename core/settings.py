@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 import dj_database_url
@@ -52,6 +53,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Third-party
     'rest_framework',  # Django REST Framework: serializers y vistas de la API
+    'rest_framework_simplejwt.token_blacklist',  # Lista negra de refresh tokens (rotación y logout)
     'corsheaders',     # Permite peticiones cross-origin desde el frontend
     # Local
     'api',             # App de citas de podogest
@@ -244,12 +246,26 @@ REST_FRAMEWORK = {
         # Límites del login del panel (/api/token/), por IP.
         'login_burst': '5/min',
         'login_sustained': '20/hour',
+        # Renovación y logout (/api/token/refresh/, /api/logout/), por IP. Separado
+        # del cupo anónimo para que el tráfico del sitio público no corte la sesión.
+        'jwt_refresh': '60/hour',
     },
     # Número de proxies delante de Django: 1 por defecto (Render). Ajustable con
     # la variable NUM_PROXIES. Sin esto, DRF confía en X-Forwarded-For completo
     # y un atacante podría falsearlo para saltarse el límite.
     'NUM_PROXIES': int(os.environ.get('NUM_PROXIES', '1')),
 }
+
+# JWT del panel: el acceso dura 30 min y se renueva con el refresh token, que
+# dura una jornada (12 h). Cada renovación entrega un refresh nuevo e invalida
+# el anterior en la lista negra; /api/logout/ invalida el actual.
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'REFRESH_TOKEN_LIFETIME': timedelta(hours=12),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+}
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,

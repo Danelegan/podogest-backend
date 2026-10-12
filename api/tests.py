@@ -14,6 +14,8 @@ from django.utils import timezone
 from openpyxl import load_workbook
 from rest_framework.test import APIClient
 from rest_framework.throttling import AnonRateThrottle
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.models import Appointment, ClinicalRecord
 from api.services import make_appointment_token
@@ -597,3 +599,77 @@ class PermisosTests(TestCase):
         self.assertEqual(self.client.get('/api/appointments/').status_code, 200)
         self.assertEqual(self.client.get('/api/clinical-records/').status_code, 200)
         self.assertEqual(self.client.get('/api/').status_code, 200)
+
+
+class SesionJWTTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+        User.objects.create_user('podologa', password='clave-segura-123')
+        login = self.client.post('/api/token/', {'username': 'podologa', 'password': 'clave-segura-123'},
+                                 format='json')
+        self.access, self.refresh = login.data['access'], login.data['refresh']
+
+    def renovar(self, refresh):
+        return self.client.post('/api/token/refresh/', {'refresh': refresh}, format='json')
+
+    def test_duracion_de_los_tokens(self):
+        access, refresh = AccessToken(self.access), RefreshToken(self.refresh)
+        self.assertEqual(access['exp'] - access['iat'], 30 * 60)
+        self.assertEqual(refresh['exp'] - refresh['iat'], 12 * 60 * 60)
+
+    def test_renovar_rota_el_refresh_y_bloquea_el_anterior(self):
+        response = self.renovar(self.refresh)
+        self.assertEqual(response.status_code, 200)
+        nuevo = response.data['refresh']
+        self.assertNotEqual(nuevo, self.refresh)
+        self.assertIn('access', response.data)
+        # El anterior quedó en la lista negra; el nuevo no.
+        anterior_jti = RefreshToken(self.refresh, verify=False)['jti']
+        nuevo_jti = RefreshToken(nuevo)['jti']
+        self.assertTrue(BlacklistedToken.objects.filter(token__jti=anterior_jti).exists())
+        self.assertFalse(BlacklistedToken.objects.filter(token__jti=nuevo_jti).exists())
+
+        # El refresh anterior ya no sirve; el nuevo sí.
+        self.assertEqual(self.renovar(self.refresh).status_code, 401)
+        self.assertEqual(self.renovar(nuevo).status_code, 200)
+
+    def test_el_nuevo_access_funciona(self):
+        access = self.renovar(self.refresh).data['access']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access}')
+        self.assertEqual(self.client.get('/api/appointments/').status_code, 200)
+
+    def test_logout_invalida_el_refresh(self):
+        response = self.client.post('/api/logout/', {'refresh': self.refresh}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(BlacklistedToken.objects.count(), 1)
+        self.assertEqual(self.renovar(self.refresh).status_code, 401)
+        # Repetir el logout con el mismo token tampoco funciona.
+        self.assertEqual(self.client.post('/api/logout/', {'refresh': self.refresh}, format='json').status_code, 401)
+
+    def test_logout_rechaza_tokens_invalidos(self):
+        self.assertEqual(self.client.post('/api/logout/', {'refresh': 'malo'}, format='json').status_code, 401)
+        self.assertEqual(self.client.post('/api/logout/', {}, format='json').status_code, 400)
+        # Un access token no sirve para cerrar sesión.
+        self.assertEqual(self.client.post('/api/logout/', {'refresh': self.access}, format='json').status_code, 401)
+        self.assertFalse(BlacklistedToken.objects.exists())
+
+    def test_el_cupo_anonimo_no_afecta_la_renovacion(self):
+        with patch.dict(AnonRateThrottle.THROTTLE_RATES, {'anon': '1/min'}):
+            self.assertEqual(self.client.get('/api/appointments/horarios-ocupados/').status_code, 200)
+            self.assertEqual(self.client.get('/api/appointments/horarios-ocupados/').status_code, 429)
+            response = self.renovar(self.refresh)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                self.client.post('/api/logout/', {'refresh': response.data['refresh']}, format='json').status_code,
+                200,
+            )
+
+    def test_renovacion_tiene_su_propio_limite(self):
+        refresh = self.refresh
+        with patch.dict(AnonRateThrottle.THROTTLE_RATES, {'jwt_refresh': '2/min'}):
+            for _ in range(2):
+                response = self.renovar(refresh)
+                self.assertEqual(response.status_code, 200)
+                refresh = response.data['refresh']
+            self.assertEqual(self.renovar(refresh).status_code, 429)

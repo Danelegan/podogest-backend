@@ -19,7 +19,8 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework.throttling import ScopedRateThrottle
+from rest_framework_simplejwt.views import TokenBlacklistView, TokenObtainPairView, TokenRefreshView
 
 from .models import Appointment, ClinicalRecord
 from .serializers import AppointmentSerializer, ClinicalRecordSerializer, PublicAppointmentSerializer
@@ -227,6 +228,29 @@ class LoginView(TokenObtainPairView):
     throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
     throttle_scope_burst = 'login_burst'
     throttle_scope_sustained = 'login_sustained'
+
+
+class RefreshView(TokenRefreshView):
+    """Renueva el acceso con el refresh token (que rota: el anterior queda en la lista negra).
+
+    Público: lo protege el propio refresh token. Tiene su propio límite por IP,
+    separado del cupo anónimo.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'jwt_refresh'
+
+
+class LogoutView(TokenBlacklistView):
+    """Cierra la sesión: recibe {"refresh": "..."} y lo pone en la lista negra.
+
+    El access token sigue siendo válido hasta que expira (máx. 30 min).
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'jwt_refresh'
 
 
 # --- Enlaces del correo de recordatorio -------------------------------------
