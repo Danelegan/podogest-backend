@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
+from django.db import OperationalError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -380,3 +381,25 @@ class ExportarRespaldoTests(TestCase):
         self.client.force_authenticate(User.objects.create_user('podologa'))
         response = self.client.get(self.url, HTTP_ORIGIN='https://podogest-frontend.vercel.app')
         self.assertIn('Content-Disposition', response['Access-Control-Expose-Headers'])
+
+
+class HealthCheckTests(TestCase):
+    url = '/api/health/'
+
+    def test_responde_ok_sin_autenticacion(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'status': 'ok'})
+
+    def test_responde_503_si_la_base_de_datos_falla(self):
+        with patch('api.views.connection.cursor', side_effect=OperationalError('db caída')),                 self.assertLogs('api.views', level='ERROR'):
+            response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 503)
+        # No filtra el error de la base de datos.
+        self.assertEqual(response.json(), {'status': 'error'})
+
+    def test_no_le_aplica_el_limite_anonimo(self):
+        cache.clear()
+        for _ in range(105):
+            response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)

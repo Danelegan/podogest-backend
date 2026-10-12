@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # PostgreSQL desechable, igual que en producción (Render). Django crea y
+    # borra su propia base test_podogest; no hay datos reales.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: podogest
+          POSTGRES_PASSWORD: podogest
+          POSTGRES_DB: podogest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    # Valores ficticios solo para CI: ningún secreto de producción.
+    env:
+      SECRET_KEY: ci-insecure-secret-key-solo-para-tests
+      DEBUG: 'False'
+      DATABASE_URL: postgres://podogest:podogest@localhost:5432/podogest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Django check
+        run: python manage.py check
+
+      - name: Tests
+        run: python manage.py test

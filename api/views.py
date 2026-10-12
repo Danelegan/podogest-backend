@@ -1,14 +1,16 @@
 import hmac
+import logging
 import re
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
-from django.db import transaction
+from django.db import DatabaseError, connection, transaction
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_GET, require_http_methods
+from django.views.decorators.http import require_GET, require_http_methods, require_safe
 from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -22,6 +24,8 @@ from .models import Appointment, ClinicalRecord
 from .serializers import AppointmentSerializer, ClinicalRecordSerializer
 from .services import read_appointment_token, send_appointment_confirmation, send_due_reminders
 from .throttles import ReservaBurstThrottle, ReservaSustainedThrottle
+
+logger = logging.getLogger(__name__)
 
 
 # Encabezados del respaldo y su ancho máximo de columna en Excel.
@@ -319,3 +323,21 @@ def cron_send_reminders(request):
 
     sent, due = send_due_reminders()
     return JsonResponse({'enviados': sent, 'pendientes': due})
+
+
+# --- Health check (Render / monitores externos) ------------------------------
+# Vista simple fuera de DRF: así no le aplica el límite anónimo de 100/hora,
+# que los chequeos frecuentes de Render agotarían.
+
+@never_cache
+@require_safe
+def health(request):
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+            cursor.fetchone()
+    except DatabaseError:
+        # El detalle solo va al log; la respuesta no expone nada.
+        logger.exception('Health check: la base de datos no responde.')
+        return JsonResponse({'status': 'error'}, status=503)
+    return JsonResponse({'status': 'ok'})

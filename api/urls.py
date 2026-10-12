@@ -7,6 +7,7 @@ from .views import (
     cancelar_cita,
     confirmar_cita,
     cron_send_reminders,
+    health,
 )
 
 router = DefaultRouter()
@@ -19,5 +20,7 @@ urlpatterns = [
     path('citas/<str:token>/cancelar/', cancelar_cita, name='cancelar_cita'),
     # Lo llama cron-job.org periódicamente (protegido con CRON_SECRET).
     path('cron/send-reminders/', cron_send_reminders, name='cron_send_reminders'),
+    # Health check público para Render (sin datos, sin autenticación).
+    path('health/', health, name='health'),
     *router.urls,
 ]
